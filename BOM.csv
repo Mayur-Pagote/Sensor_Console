@@ -1,0 +1,13 @@
+Component,Qty.,Unit Cost (INR),Designator,Source/Type,Purpose
+NodeMCU ESP8266 (v3),1,~250,U1,Amazon,Main microcontroller and processing unit
+"SSD1306 OLED Display (0.96"", I2C)",1,~180,DISP1,REES52,Primary user interface for menu and sensor data display
+Tactile Push Button (6×6mm),2,~5 each,"SW1, SW2",Robu,Menu navigation and selection input
+HC-SR04 Ultrasonic Sensor,1,~80,US1,Robu,Distance measurement experiment module
+Pulse Sensor (SEN-11574 compatible),1,~200,PS1,Amazon,Heart rate monitoring experiment module
+Capacitive Soil Moisture Sensor,1,~150,SM1,Amazon,Soil moisture analysis experiment module
+6-Pin JST Female Connector (2.54mm),4,~20 each,J1–J4,Amazon,Standardised modular sensor interface
+Breadboard (830-point),2,~60 each,"BB1, BB2",Robu,Prototype circuit assembly
+"Jumper Wires (M–M, M–F assorted)",1 set,~60,—,Amazon,Internal wiring connections
+"Micro-USB Cable (data-capable, ?1m)",1,~80,—,Amazon,Firmware programming and power supply
+Li-Po Battery,1,~150,PWR1,Local Purchase,Standalone Power supply
+Total approximate cost,—,"~1,530",—,—,Per complete unit
