@@ -5,91 +5,114 @@
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 
-Adafruit_SSD1306 display(
-SCREEN_WIDTH,
-SCREEN_HEIGHT,
-&Wire,
--1
-);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// Buttons
-#define BTN_NAV D5
-#define BTN_SELECT D6
+// ================= PIN DEFINITIONS =================
+#define BTN_NAV     D5
+#define BTN_SELECT  D6
 
-// Sensors
-#define TRIG D7
-#define ECHO D8
-#define ANALOG_PIN A0
+#define TRIG_PIN    D7
+#define ECHO_PIN    D8
 
-enum State {
+#define ANALOG_PIN  A0
+
+// ================= MENU STATES =================
+enum Mode {
   MENU,
   DISTANCE,
-  PULSE,
-  MOISTURE
+  HEART,
+  SOIL
 };
 
-State currentState = MENU;
+Mode currentMode = MENU;
 
-int menuIndex = 0;
-
+// ================= MENU ITEMS =================
 const char* menuItems[] = {
   "Distance",
   "Heart Rate",
   "Soil Moisture"
 };
 
-unsigned long lastBeat = 0;
+int menuIndex = 0;
+
+// ================= BUTTON VARIABLES =================
+bool lastNavState = HIGH;
+bool lastSelectState = HIGH;
+
+unsigned long lastDebounce = 0;
+const unsigned long debounceDelay = 150;
+
+// ================= HEART VARIABLES =================
 int bpm = 0;
+unsigned long lastBeat = 0;
+bool pulseDetected = false;
+
+// ====================================================
 
 void setup() {
+
+  Serial.begin(115200);
+  delay(1000);
+
+  Wire.begin(D2, D1);
 
   pinMode(BTN_NAV, INPUT_PULLUP);
   pinMode(BTN_SELECT, INPUT_PULLUP);
 
-  pinMode(TRIG, OUTPUT);
-  pinMode(ECHO, INPUT);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
 
-  Wire.begin(D2, D1);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
 
-  display.begin(
-  SSD1306_SWITCHCAPVCC,
-  0x3C
-  );
+    Serial.println("OLED NOT FOUND");
 
+    while (true) {
+      delay(100);
+    }
+  }
+
+  display.setTextColor(WHITE);
   display.clearDisplay();
+  display.display();
 
-  splash();
+  splashScreen();
 }
 
 void loop() {
 
-  switch(currentState) {
+  handleButtons();
+
+  switch (currentMode) {
 
     case MENU:
-      menuLoop();
+      drawMenu();
       break;
 
     case DISTANCE:
-      distanceLoop();
+      distanceScreen();
       break;
 
-    case PULSE:
-      pulseLoop();
+    case HEART:
+      heartScreen();
       break;
 
-    case MOISTURE:
-      moistureLoop();
+    case SOIL:
+      soilScreen();
       break;
   }
 }
 
-void splash() {
+// ====================================================
+
+void splashScreen() {
 
   display.clearDisplay();
 
   display.setTextSize(2);
-  display.setCursor(10,20);
+  display.setCursor(10, 15);
   display.println("Sensor");
+
+  display.setCursor(10, 40);
   display.println("Console");
 
   display.display();
@@ -97,50 +120,74 @@ void splash() {
   delay(2000);
 }
 
-bool navPressed() {
+// ====================================================
 
-  if(!digitalRead(BTN_NAV)) {
-    delay(200);
-    return true;
+void handleButtons() {
+
+  bool nav = digitalRead(BTN_NAV);
+  bool sel = digitalRead(BTN_SELECT);
+
+  if (millis() - lastDebounce > debounceDelay) {
+
+    if (nav == LOW && lastNavState == HIGH) {
+
+      if (currentMode == MENU) {
+
+        menuIndex++;
+
+        if (menuIndex > 2)
+          menuIndex = 0;
+      }
+
+      lastDebounce = millis();
+    }
+
+    if (sel == LOW && lastSelectState == HIGH) {
+
+      if (currentMode == MENU) {
+
+        if (menuIndex == 0) currentMode = DISTANCE;
+        if (menuIndex == 1) currentMode = HEART;
+        if (menuIndex == 2) currentMode = SOIL;
+      }
+      else {
+
+        currentMode = MENU;
+      }
+
+      lastDebounce = millis();
+    }
   }
-  return false;
+
+  lastNavState = nav;
+  lastSelectState = sel;
 }
 
-bool selectPressed() {
+// ====================================================
 
-  if(!digitalRead(BTN_SELECT)) {
-    delay(200);
-    return true;
-  }
-  return false;
-}
+void drawMenu() {
 
-void menuLoop() {
+  static unsigned long lastRefresh = 0;
 
-  if(navPressed()) {
-    menuIndex++;
-    if(menuIndex > 2) menuIndex = 0;
-  }
+  if (millis() - lastRefresh < 100)
+    return;
 
-  if(selectPressed()) {
-
-    if(menuIndex == 0)
-      currentState = DISTANCE;
-
-    if(menuIndex == 1)
-      currentState = PULSE;
-
-    if(menuIndex == 2)
-      currentState = MOISTURE;
-  }
+  lastRefresh = millis();
 
   display.clearDisplay();
 
   display.setTextSize(1);
 
-  for(int i=0;i<3;i++) {
+  display.setCursor(0, 0);
+  display.println("Sensor Console");
 
-    if(i == menuIndex)
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  for (int i = 0; i < 3; i++) {
+
+    display.setCursor(0, 18 + i * 15);
+
+    if (i == menuIndex)
       display.print("> ");
     else
       display.print("  ");
@@ -151,53 +198,108 @@ void menuLoop() {
   display.display();
 }
 
+// ====================================================
+
 float getDistance() {
 
-  digitalWrite(TRIG, LOW);
-  delayMicroseconds(2);
+  float total = 0;
+  int validReadings = 0;
 
-  digitalWrite(TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG, LOW);
+  for (int i = 0; i < 5; i++) {
 
-  long duration =
-  pulseIn(ECHO,HIGH,30000);
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(5);
 
-  if(duration == 0)
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+
+    digitalWrite(TRIG_PIN, LOW);
+
+    long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+    if (duration > 0) {
+
+      float distance = duration * 0.0343 / 2.0;
+
+      total += distance;
+      validReadings++;
+    }
+
+    delay(10);
+  }
+
+  if (validReadings == 0)
     return -1;
 
-  float dist =
-  duration * 0.0343 / 2.0;
-
-  return dist;
+  return total / validReadings;
 }
 
-void distanceLoop() {
+// ====================================================
 
-  if(selectPressed()) {
-    currentState = MENU;
-    return;
-  }
+void distanceScreen() {
 
   float distance = getDistance();
 
   display.clearDisplay();
 
   display.setTextSize(1);
-  display.setCursor(0,0);
 
-  if(distance < 0) {
+  display.setCursor(0, 0);
+  display.println("Distance Sensor");
 
-    display.println("Connect");
-    display.println("HC-SR04 Sensor");
+  display.drawLine(0, 10, 128, 10, WHITE);
 
-  } else {
+  if (distance < 0) {
 
-    display.println("Distance");
+    display.setCursor(0, 25);
+    display.println("Connect HC-SR04");
+  }
+  else {
 
     display.setTextSize(2);
-    display.print(distance,1);
-    display.println("cm");
+
+    display.setCursor(10, 30);
+    display.print(distance, 1);
+    display.print("cm");
+  }
+
+  display.display();
+
+  delay(250);
+}
+
+// ====================================================
+
+void soilScreen() {
+
+  int raw = analogRead(A0);
+
+  display.clearDisplay();
+
+  display.setCursor(0, 0);
+  display.println("Soil Moisture");
+
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  if (raw < 20) {
+
+    display.setCursor(0, 25);
+    display.println("Connect Sensor");
+  }
+  else {
+
+    int moisture = map(raw, 900, 300, 0, 100);
+
+    moisture = constrain(moisture, 0, 100);
+
+    display.setCursor(0, 22);
+    display.print("ADC: ");
+    display.println(raw);
+
+    display.setCursor(0, 42);
+    display.print("Moisture: ");
+    display.print(moisture);
+    display.print("%");
   }
 
   display.display();
@@ -205,99 +307,61 @@ void distanceLoop() {
   delay(300);
 }
 
-void pulseLoop() {
+// ====================================================
 
-  if(selectPressed()) {
-    currentState = MENU;
-    return;
-  }
+void heartScreen() {
 
   int signal = analogRead(A0);
 
-  static int threshold = 550;
-  static bool beatDetected = false;
+  const int threshold = 550;
 
-  if(signal > threshold && !beatDetected) {
+  if (signal > threshold && !pulseDetected) {
 
-    beatDetected = true;
+    pulseDetected = true;
 
     unsigned long now = millis();
 
-    if(lastBeat > 0) {
+    if (lastBeat > 0) {
 
-      bpm = 60000 /
-      (now - lastBeat);
+      bpm = 60000 / (now - lastBeat);
+
+      if (bpm < 40 || bpm > 180)
+        bpm = 0;
     }
 
     lastBeat = now;
   }
 
-  if(signal < threshold)
-    beatDetected = false;
+  if (signal < threshold)
+    pulseDetected = false;
 
   display.clearDisplay();
 
-  display.setTextSize(1);
+  display.setCursor(0, 0);
   display.println("Heart Rate");
 
-  if(signal < 50) {
+  display.drawLine(0, 10, 128, 10, WHITE);
 
-    display.println("");
-    display.println("Connect Pulse");
-    display.println("Sensor");
+  if (signal < 50) {
 
-  } else {
+    display.setCursor(0, 25);
+    display.println("Connect Sensor");
+  }
+  else {
 
     display.setTextSize(2);
+
+    display.setCursor(10, 25);
     display.print(bpm);
-    display.println(" BPM");
+    display.print(" BPM");
+
+    if (pulseDetected) {
+
+      display.fillCircle(115, 50, 5, WHITE);
+    }
   }
 
   display.display();
 
   delay(20);
-}
-
-void moistureLoop() {
-
-  if(selectPressed()) {
-    currentState = MENU;
-    return;
-  }
-
-  int raw = analogRead(A0);
-
-  int moisture =
-  map(raw, 900, 300, 0, 100);
-
-  moisture = constrain(
-  moisture,
-  0,
-  100
-  );
-
-  display.clearDisplay();
-
-  display.setTextSize(1);
-  display.println("Soil Moisture");
-
-  if(raw < 10) {
-
-    display.println("");
-    display.println("Connect");
-    display.println("Sensor");
-
-  } else {
-
-    display.print("Raw:");
-    display.println(raw);
-
-    display.setTextSize(2);
-    display.print(moisture);
-    display.println("%");
-  }
-
-  display.display();
-
-  delay(500);
 }
